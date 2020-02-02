@@ -41,10 +41,7 @@ namespace v2rayN.Handler
 
                 ////默认监听端口
                 //config.pacPort = 8888;
-
-                // 默认缓存七天
-                config.CacheDays = 7;
-
+                 
                 // 默认不开启统计
                 config.enableStatistics = false;
 
@@ -125,10 +122,18 @@ namespace v2rayN.Handler
             {
                 config.urlGFWList = Global.GFWLIST_URL;
             }
+            //if (Utils.IsNullOrEmpty(config.remoteDNS))
+            //{
+            //    config.remoteDNS = "1.1.1.1";
+            //}
 
             if (config.subItem == null)
             {
                 config.subItem = new List<SubItem>();
+            }
+            if (config.userPacRule == null)
+            {
+                config.userPacRule = new List<string>();
             }
 
             if (config == null

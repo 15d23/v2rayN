@@ -9,14 +9,16 @@ using v2rayN.Handler;
 using v2rayN.HttpProxyHandler;
 using v2rayN.Mode;
 using v2rayN.Base;
+using v2rayN.Tool;
+using System.Diagnostics;
+using v2rayN.Properties;
+using Newtonsoft.Json;
 
 namespace v2rayN.Forms
 {
     public partial class MainForm : BaseForm
     {
         private V2rayHandler v2rayHandler;
-        private PACListHandle pacListHandle;
-        private DownloadHandle downloadHandle;
         private List<int> lvSelecteds = new List<int>();
         private StatisticsHandler statistics = null;
 
@@ -29,11 +31,10 @@ namespace v2rayN.Forms
             this.WindowState = FormWindowState.Minimized;
             HideForm();
             this.Text = Utils.GetVersion();
+            Global.processJob = new Job();
 
             Application.ApplicationExit += (sender, args) =>
             {
-                Utils.ClearTempPath();
-
                 v2rayHandler.V2rayStop();
 
                 HttpProxyHandle.CloseHttpAgent(config);
@@ -197,7 +198,7 @@ namespace v2rayN.Forms
                 ListViewItem lvItem = null;
                 if (statistics != null && statistics.Enable)
                 {
-                    var index = statistics.Statistic.FindIndex(item_ => item_.address == item.address);
+                    var index = statistics.Statistic.FindIndex(item_ => item_.itemId == item.getItemId());
                     if (index != -1)
                     {
                         totalUp = Utils.HumanFy(statistics.Statistic[index].totalUp);
@@ -268,6 +269,7 @@ namespace v2rayN.Forms
         {
             menuServers.DropDownItems.Clear();
 
+            List<ToolStripMenuItem> lst = new List<ToolStripMenuItem>();
             for (int k = 0; k < config.vmess.Count; k++)
             {
                 VmessItem item = config.vmess[k];
@@ -280,8 +282,9 @@ namespace v2rayN.Forms
                     ts.Checked = true;
                 }
                 ts.Click += new EventHandler(ts_Click);
-                menuServers.DropDownItems.Add(ts);
+                lst.Add(ts);
             }
+            menuServers.DropDownItems.AddRange(lst.ToArray());
         }
 
         private void ts_Click(object sender, EventArgs e)
@@ -314,7 +317,7 @@ namespace v2rayN.Forms
             {
                 return;
             }
-            qrCodeControl.showQRCode(index, config);
+            //qrCodeControl.showQRCode(index, config);
         }
 
         private void DisplayToolStatus()
@@ -350,7 +353,7 @@ namespace v2rayN.Forms
                 Utils.SetClipboardData(e.ClickedItem.Text);
             }
         }
-        
+
         #endregion
 
         #region v2ray 操作
@@ -360,6 +363,8 @@ namespace v2rayN.Forms
         /// </summary>
         private void LoadV2ray()
         {
+            tsbReload.Enabled = false;
+
             if (Global.reloadV2ray)
             {
                 ClearMsg();
@@ -367,8 +372,11 @@ namespace v2rayN.Forms
             v2rayHandler.LoadV2ray(config);
             Global.reloadV2ray = false;
             ConfigHandler.SaveConfig(ref config, false);
+            statistics?.SaveToFile();
 
             ChangePACButtonStatus(config.listenerType);
+
+            tsbReload.Enabled = true;
         }
 
         /// <summary>
@@ -377,6 +385,7 @@ namespace v2rayN.Forms
         private void CloseV2ray()
         {
             ConfigHandler.SaveConfig(ref config, false);
+            statistics?.SaveToFile();
 
             ChangePACButtonStatus(0);
 
@@ -386,6 +395,26 @@ namespace v2rayN.Forms
         #endregion
 
         #region 功能按钮
+
+        private void lvServers_Click(object sender, EventArgs e)
+        {
+            int index = -1;
+            try
+            {
+                if (lvServers.SelectedIndices.Count > 0)
+                {
+                    index = lvServers.SelectedIndices[0];
+                }
+            }
+            catch
+            {
+            }
+            if (index < 0)
+            {
+                return;
+            }
+            qrCodeControl.showQRCode(index, config);
+        }
 
         private void lvServers_DoubleClick(object sender, EventArgs e)
         {
@@ -861,9 +890,9 @@ namespace v2rayN.Forms
                 ClearMsg();
             }
             this.txtMsgBox.AppendText(msg);
-            if (!msg.EndsWith("\r\n"))
+            if (!msg.EndsWith(Environment.NewLine))
             {
-                this.txtMsgBox.AppendText("\r\n");
+                this.txtMsgBox.AppendText(Environment.NewLine);
             }
         }
 
@@ -941,9 +970,9 @@ namespace v2rayN.Forms
         }
         private void ClearTestResult()
         {
-            for (int k = 0; k < config.vmess.Count; k++)
+            for (int k = 0; k < lvSelecteds.Count; k++)
             {
-                SetTestResult(k, "");
+                SetTestResult(lvSelecteds[k], "");
             }
         }
         private void UpdateSpeedtestHandler(int index, string msg)
@@ -958,51 +987,34 @@ namespace v2rayN.Forms
             });
         }
 
-        private void UpdateStatisticsHandler(ulong totalUp, ulong totalDown, ulong up, ulong down, List<Mode.ServerStatistics> statistics)
+        private void UpdateStatisticsHandler(ulong up, ulong down, List<ServerStatItem> statistics)
         {
             try
             {
                 up /= (ulong)(config.statisticsFreshRate / 1000f);
                 down /= (ulong)(config.statisticsFreshRate / 1000f);
-                toolSslServerSpeed.Text = string.Format(
-                    "{0}/s↑ | {1}/s↓",
-                      Utils.HumanFy(up),
-                      Utils.HumanFy(down)
-                );
+                toolSslServerSpeed.Text = string.Format("{0}/s↑ | {1}/s↓", Utils.HumanFy(up), Utils.HumanFy(down));
 
                 List<string[]> datas = new List<string[]>();
                 for (int i = 0; i < config.vmess.Count; i++)
                 {
-                    string totalUp_ = string.Empty,
-                            totalDown_ = string.Empty,
-                            todayUp_ = string.Empty,
-                            todayDown_ = string.Empty;
-                    var index = statistics.FindIndex(item_ => Utils.IsIdenticalServer(item_, new ServerStatistics(config.vmess[i].remarks, config.vmess[i].address, config.vmess[i].port, config.vmess[i].path, config.vmess[i].requestHost, 0, 0, 0, 0)));
+                    var index = statistics.FindIndex(item_ => item_.itemId == config.vmess[i].getItemId());
                     if (index != -1)
                     {
-                        totalUp_ = Utils.HumanFy(statistics[index].totalUp);
-                        totalDown_ = Utils.HumanFy(statistics[index].totalDown);
-                        todayUp_ = Utils.HumanFy(statistics[index].todayUp);
-                        todayDown_ = Utils.HumanFy(statistics[index].todayDown);
-                    }
+                        lvServers.Invoke((MethodInvoker)delegate
+                        {
+                            lvServers.SuspendLayout();
 
-                    datas.Add(new string[] { totalUp_, totalDown_, todayUp_, todayDown_ });
+                            var indexStart = 9;
+                            lvServers.Items[i].SubItems[indexStart++].Text = Utils.HumanFy(statistics[index].totalUp);
+                            lvServers.Items[i].SubItems[indexStart++].Text = Utils.HumanFy(statistics[index].totalDown);
+                            lvServers.Items[i].SubItems[indexStart++].Text = Utils.HumanFy(statistics[index].todayUp);
+                            lvServers.Items[i].SubItems[indexStart++].Text = Utils.HumanFy(statistics[index].todayDown);
+
+                            lvServers.ResumeLayout();
+                        });
+                    }
                 }
-
-                lvServers.Invoke((MethodInvoker)delegate
-                {
-                    lvServers.SuspendLayout();
-                    for (int i = 0; i < datas.Count; i++)
-                    {
-                        var indexStart = 9;
-                        lvServers.Items[i].SubItems[indexStart++].Text = datas[i][0];
-                        lvServers.Items[i].SubItems[indexStart++].Text = datas[i][1];
-                        lvServers.Items[i].SubItems[indexStart++].Text = datas[i][2];
-                        lvServers.Items[i].SubItems[indexStart++].Text = datas[i][3];
-                    }
-                    lvServers.ResumeLayout();
-                });
-
             }
             catch (Exception ex)
             {
@@ -1125,11 +1137,8 @@ namespace v2rayN.Forms
 
         private void tsbCheckUpdateN_Click(object sender, EventArgs e)
         {
-            System.Diagnostics.Process.Start(Global.UpdateUrl);
-        }
-
-        private void tsbCheckUpdateCore_Click(object sender, EventArgs e)
-        {
+            //System.Diagnostics.Process.Start(Global.UpdateUrl);
+            DownloadHandle downloadHandle = null;
             if (downloadHandle == null)
             {
                 downloadHandle = new DownloadHandle();
@@ -1149,7 +1158,73 @@ namespace v2rayN.Forms
                             }
                             else
                             {
-                                downloadHandle.DownloadFileAsync(config, url, null);
+                                downloadHandle.DownloadFileAsync(config, url, null, -1);
+                            }
+                        }));
+                    }
+                    else
+                    {
+                        AppendText(false, args.Msg);
+                    }
+                };
+                downloadHandle.UpdateCompleted += (sender2, args) =>
+                {
+                    if (args.Success)
+                    {
+                        AppendText(false, UIRes.I18N("MsgDownloadV2rayCoreSuccessfully"));
+
+                        try
+                        {
+                            var fileName = Utils.GetPath(downloadHandle.DownloadFileName);
+                            var process = Process.Start("v2rayUpgrade.exe", fileName);
+                            if (process.Id > 0)
+                            {
+                                menuExit_Click(null, null);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            AppendText(false, ex.Message);
+                        }
+                    }
+                    else
+                    {
+                        AppendText(false, args.Msg);
+                    }
+                };
+                downloadHandle.Error += (sender2, args) =>
+                {
+                    AppendText(true, args.GetException().Message);
+                };
+            }
+
+            AppendText(false, UIRes.I18N("MsgStartUpdatingV2rayCore"));
+            downloadHandle.AbsoluteV2rayN(config);
+        }
+
+        private void tsbCheckUpdateCore_Click(object sender, EventArgs e)
+        {
+            DownloadHandle downloadHandle = null;
+            if (downloadHandle == null)
+            {
+                downloadHandle = new DownloadHandle();
+                downloadHandle.AbsoluteCompleted += (sender2, args) =>
+                {
+                    if (args.Success)
+                    {
+                        AppendText(false, UIRes.I18N("MsgParsingV2rayCoreSuccessfully"));
+
+                        string url = args.Msg;
+                        this.Invoke((MethodInvoker)(delegate
+                        {
+
+                            if (UI.ShowYesNo(string.Format(UIRes.I18N("DownloadYesNo"), url)) == DialogResult.No)
+                            {
+                                return;
+                            }
+                            else
+                            {
+                                downloadHandle.DownloadFileAsync(config, url, null, -1);
                             }
                         }));
                     }
@@ -1171,15 +1246,8 @@ namespace v2rayN.Forms
 
                             string fileName = downloadHandle.DownloadFileName;
                             fileName = Utils.GetPath(fileName);
-                            using (ZipArchive archive = ZipFile.OpenRead(fileName))
-                            {
-                                foreach (ZipArchiveEntry entry in archive.Entries)
-                                {
-                                    if (entry.Length == 0)
-                                        continue;
-                                    entry.ExtractToFile(Utils.GetPath(entry.Name), true);
-                                }
-                            }
+                            FileManager.ZipExtractToFile(fileName);
+
                             AppendText(false, UIRes.I18N("MsgUpdateV2rayCoreSuccessfullyMore"));
 
                             Global.reloadV2ray = true;
@@ -1209,13 +1277,21 @@ namespace v2rayN.Forms
 
         private void tsbCheckUpdatePACList_Click(object sender, EventArgs e)
         {
+            DownloadHandle pacListHandle = null;
             if (pacListHandle == null)
             {
-                pacListHandle = new PACListHandle();
+                pacListHandle = new DownloadHandle();
                 pacListHandle.UpdateCompleted += (sender2, args) =>
                 {
                     if (args.Success)
                     {
+                        var result = args.Msg;
+                        if (Utils.IsNullOrEmpty(result))
+                        {
+                            return;
+                        }
+                        pacListHandle.GenPacFile(result);
+
                         AppendText(false, UIRes.I18N("MsgPACUpdateSuccessfully"));
                     }
                     else
@@ -1229,7 +1305,7 @@ namespace v2rayN.Forms
                 };
             }
             AppendText(false, UIRes.I18N("MsgStartUpdatingPAC"));
-            pacListHandle.UpdatePACFromGFWList(config);
+            pacListHandle.WebDownloadString(config.urlGFWList);
         }
 
         private void tsbCheckClearPACList_Click(object sender, EventArgs e)
@@ -1362,8 +1438,6 @@ namespace v2rayN.Forms
                 downloadHandle3.WebDownloadString(url);
                 AppendText(false, $"{hashCode}{UIRes.I18N("MsgStartGettingSubscriptions")}");
             }
-
-
         }
 
         #endregion
@@ -1385,6 +1459,7 @@ namespace v2rayN.Forms
         }
 
         #endregion
+
 
     }
 }

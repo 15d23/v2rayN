@@ -354,6 +354,7 @@ namespace v2rayN.Handler
 
                     //Mux
                     outbound.mux.enabled = config.muxEnabled;
+                    outbound.mux.concurrency = config.muxEnabled ? 8 : -1;
 
                     //远程服务器底层传输配置
                     StreamSettings streamSettings = outbound.streamSettings;
@@ -384,6 +385,8 @@ namespace v2rayN.Handler
                     serversItem.level = 1;
 
                     outbound.mux.enabled = false;
+                    outbound.mux.concurrency = -1;
+                    
 
                     outbound.protocol = "shadowsocks";
                     outbound.settings.vnext = null;
@@ -403,6 +406,8 @@ namespace v2rayN.Handler
                     //远程服务器地址和端口
                     serversItem.address = config.address();
                     serversItem.port = config.port();
+                    serversItem.method = null;
+                    serversItem.password = null;
 
                     if (!Utils.IsNullOrEmpty(config.security())
                         && !Utils.IsNullOrEmpty(config.id()))
@@ -416,6 +421,7 @@ namespace v2rayN.Handler
                     }
 
                     outbound.mux.enabled = false;
+                    outbound.mux.concurrency = -1;
 
                     outbound.protocol = "socks";
                     outbound.settings.vnext = null;
@@ -1396,6 +1402,8 @@ namespace v2rayN.Handler
 
                 msg = UIRes.I18N("InitialConfiguration");
 
+                Config configCopy = Utils.DeepCopy<Config>(config);             
+
                 string result = Utils.GetEmbedText(SampleClient);
                 if (Utils.IsNullOrEmpty(result))
                 {
@@ -1410,21 +1418,21 @@ namespace v2rayN.Handler
                     return -1;
                 }
 
-                log(config, ref v2rayConfig, false);
+                log(configCopy, ref v2rayConfig, false);
                 //routing(config, ref v2rayConfig);
-                dns(config, ref v2rayConfig);
+                dns(configCopy, ref v2rayConfig);
 
 
-                var httpPort = config.GetLocalPort("speedtest");
+                var httpPort = configCopy.GetLocalPort("speedtest");
                 for (int k = 0; k < selecteds.Count; k++)
                 {
                     int index = selecteds[k];
-                    if (config.vmess[index].configType == (int)EConfigType.Custom)
+                    if (configCopy.vmess[index].configType == (int)EConfigType.Custom)
                     {
                         continue;
                     }
 
-                    config.index = index;
+                    configCopy.index = index;
 
                     var inbound = new Inbounds();
                     inbound.listen = Global.Loopback;
@@ -1435,7 +1443,7 @@ namespace v2rayN.Handler
 
 
                     var v2rayConfigCopy = Utils.FromJson<V2rayConfig>(result);
-                    outbound(config, ref v2rayConfigCopy);
+                    outbound(configCopy, ref v2rayConfigCopy);
                     v2rayConfigCopy.outbounds[0].tag = Global.agentTag + inbound.port.ToString();
                     v2rayConfig.outbounds.Add(v2rayConfigCopy.outbounds[0]);
 
@@ -1448,7 +1456,7 @@ namespace v2rayN.Handler
 
                 Utils.ToJsonFile(v2rayConfig, fileName);
 
-                msg = string.Format(UIRes.I18N("SuccessfulConfiguration"), config.getSummary());
+                msg = string.Format(UIRes.I18N("SuccessfulConfiguration"), configCopy.getSummary());
             }
             catch (Exception ex)
             {
